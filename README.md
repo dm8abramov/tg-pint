@@ -29,10 +29,12 @@ LLM_BASE_URL=https://openrouter.ai/api/v1
 LLM_API_KEY=openrouter-key
 LLM_MODEL=provider/model:free
 REPLY_PROBABILITY=0.5
+LLM_DEBUG_LOG=false
 SYSTEM_PROMPT="Ты полезный участник группового чата. Отвечай коротко."
 ```
 
 `REPLY_PROBABILITY=0.5` means the bot replies to about half of regular group messages. Private messages, direct commands, mentions, and replies to the bot are always answered.
+Set `LLM_DEBUG_LOG=true` to log full LLM request and response JSON.
 
 Start the bot:
 

@@ -37,6 +37,7 @@ type config struct {
 	LLMModel      string
 	SystemPrompt  string
 	ReplyProb     float64
+	LLMDebugLog   bool
 }
 
 type bot struct {
@@ -133,7 +134,7 @@ func main() {
 	}
 	b.me = me
 
-	log.Printf("config loaded: llm_base_url=%s llm_model=%s reply_probability=%.2f", cfg.LLMBaseURL, cfg.LLMModel, cfg.ReplyProb)
+	log.Printf("config loaded: llm_base_url=%s llm_model=%s reply_probability=%.2f llm_debug_log=%t", cfg.LLMBaseURL, cfg.LLMModel, cfg.ReplyProb, cfg.LLMDebugLog)
 	log.Printf("started as @%s id=%d", b.me.Username, b.me.ID)
 	if err := b.poll(ctx); err != nil {
 		log.Fatal(err)
@@ -152,6 +153,10 @@ func loadConfig() (config, error) {
 	if replyProb < 0 || replyProb > 1 {
 		return config{}, fmt.Errorf("REPLY_PROBABILITY must be between 0 and 1")
 	}
+	llmDebugLog, err := parseOptionalBool("LLM_DEBUG_LOG", false)
+	if err != nil {
+		return config{}, err
+	}
 
 	cfg := config{
 		TelegramToken: strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
@@ -160,6 +165,7 @@ func loadConfig() (config, error) {
 		LLMModel:      strings.TrimSpace(os.Getenv("LLM_MODEL")),
 		SystemPrompt:  firstNonEmpty(os.Getenv("SYSTEM_PROMPT"), defaultSystem),
 		ReplyProb:     replyProb,
+		LLMDebugLog:   llmDebugLog,
 	}
 
 	var missing []string
@@ -187,6 +193,18 @@ func parseOptionalFloat64(name string, defaultValue float64) (float64, error) {
 	value, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a number: %w", name, err)
+	}
+	return value, nil
+}
+
+func parseOptionalBool(name string, defaultValue bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", name, err)
 	}
 	return value, nil
 }
@@ -320,13 +338,12 @@ func (b *bot) handleMessage(ctx context.Context, msg telegramMessage) error {
 	}
 
 	author := displayName(msg.From)
-	b.histories.add(msg.Chat.ID, chatMessage{
-		Role: "user",
-		Text: msg.Text,
-	})
-
 	shouldAnswer, prompt, reason := b.shouldAnswer(msg)
 	if !shouldAnswer {
+		b.histories.add(msg.Chat.ID, chatMessage{
+			Role: "user",
+			Text: msg.Text,
+		})
 		log.Printf("skip message id=%d chat_id=%d type=%s from=%s text=%q decision=%s", msg.MessageID, msg.Chat.ID, msg.Chat.Type, author, logPreview(msg.Text), reason)
 		return nil
 	}
@@ -354,6 +371,10 @@ func (b *bot) handleMessage(ctx context.Context, msg telegramMessage) error {
 	}
 	answer = trimTelegramMessage(answer)
 	log.Printf("LLM answered message id=%d in=%s requested_model=%s used_model=%s answer_len=%d answer=%q", msg.MessageID, time.Since(started).Round(time.Millisecond), b.cfg.LLMModel, firstNonEmpty(usedModel, "unknown"), len([]rune(answer)), logPreview(answer))
+	b.histories.add(msg.Chat.ID, chatMessage{
+		Role: "user",
+		Text: prompt,
+	})
 	b.histories.add(msg.Chat.ID, chatMessage{
 		Role: "assistant",
 		Text: answer,
@@ -529,6 +550,7 @@ func (b *bot) askLLM(ctx context.Context, chatID int64, prompt string) (string, 
 		Temperature: 0.7,
 		MaxTokens:   700,
 	}
+	b.logLLMDebug("request", reqBody)
 
 	var respBody llmResponse
 	if err := b.postJSON(ctx, b.cfg.LLMBaseURL+"/chat/completions", reqBody, &respBody, map[string]string{
@@ -538,6 +560,7 @@ func (b *bot) askLLM(ctx context.Context, chatID int64, prompt string) (string, 
 	}); err != nil {
 		return "", "", err
 	}
+	b.logLLMDebug("response", respBody)
 	if respBody.Error != nil && respBody.Error.Message != "" {
 		return "", respBody.Model, errors.New(respBody.Error.Message)
 	}
@@ -550,6 +573,19 @@ func (b *bot) askLLM(ctx context.Context, chatID int64, prompt string) (string, 
 		return "", respBody.Model, errors.New("empty LLM message")
 	}
 	return answer, respBody.Model, nil
+}
+
+func (b *bot) logLLMDebug(kind string, value any) {
+	if !b.cfg.LLMDebugLog {
+		return
+	}
+
+	raw, err := json.Marshal(value)
+	if err != nil {
+		log.Printf("LLM %s: marshal debug payload: %v", kind, err)
+		return
+	}
+	log.Printf("LLM %s: %s", kind, raw)
 }
 
 func (b *bot) getMe(ctx context.Context) (telegramUser, error) {

@@ -132,3 +132,23 @@ func TestUpdateSystemPromptClearsHistory(t *testing.T) {
 		t.Fatalf("history len = %d, want 0", len(got))
 	}
 }
+
+func TestParseOptionalBool(t *testing.T) {
+	t.Setenv("TEST_BOOL", "true")
+	got, err := parseOptionalBool("TEST_BOOL", false)
+	if err != nil {
+		t.Fatalf("parseOptionalBool() error = %v", err)
+	}
+	if !got {
+		t.Fatalf("parseOptionalBool() = false, want true")
+	}
+
+	t.Setenv("TEST_BOOL", "")
+	got, err = parseOptionalBool("TEST_BOOL", true)
+	if err != nil {
+		t.Fatalf("parseOptionalBool() error = %v", err)
+	}
+	if !got {
+		t.Fatalf("parseOptionalBool() = false, want default true")
+	}
+}
