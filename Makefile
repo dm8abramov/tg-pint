@@ -2,6 +2,7 @@
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 DOCKER_IMAGE ?= tg-pint:local
+DOCKER_CONTAINER ?= tg-pint
 
 run:
 	go run .
@@ -22,4 +23,5 @@ docker-build:
 	docker build -t $(DOCKER_IMAGE) .
 
 docker-run: docker-build
-	docker run --rm --env-file .env $(DOCKER_IMAGE)
+	-docker rm -f $(DOCKER_CONTAINER)
+	docker run --rm --name $(DOCKER_CONTAINER) --env-file .env $(DOCKER_IMAGE)
