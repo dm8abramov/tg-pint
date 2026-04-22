@@ -48,6 +48,13 @@ Or run it in Docker. The image does not include `.env`; runtime variables are pa
 make docker-run
 ```
 
+`make docker-run` starts the container in background with Docker restart policy `unless-stopped`.
+On CentOS, enable Docker itself so the container starts after reboot:
+
+```bash
+sudo systemctl enable --now docker
+```
+
 Other commands:
 
 ```bash
@@ -55,6 +62,8 @@ make test
 make build
 make fmt
 make docker-build
+make docker-logs
+make docker-stop
 ```
 
 For full group-chat context, disable BotFather privacy mode so Telegram forwards regular group messages to the bot. With privacy mode enabled, use commands and replies to the bot.

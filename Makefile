@@ -1,8 +1,9 @@
-.PHONY: run test build fmt env docker-build docker-run
+.PHONY: run test build fmt env docker-build docker-run docker-stop docker-logs
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 DOCKER_IMAGE ?= tg-pint:local
 DOCKER_CONTAINER ?= tg-pint
+DOCKER_RESTART ?= unless-stopped
 
 run:
 	go run .
@@ -24,4 +25,10 @@ docker-build:
 
 docker-run: docker-build
 	-docker rm -f $(DOCKER_CONTAINER)
-	docker run --rm --name $(DOCKER_CONTAINER) --env-file .env $(DOCKER_IMAGE)
+	docker run -d --restart $(DOCKER_RESTART) --name $(DOCKER_CONTAINER) --env-file .env $(DOCKER_IMAGE)
+
+docker-stop:
+	-docker rm -f $(DOCKER_CONTAINER)
+
+docker-logs:
+	docker logs -f $(DOCKER_CONTAINER)
