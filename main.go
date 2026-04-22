@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -40,6 +41,7 @@ type config struct {
 
 type bot struct {
 	cfg       config
+	cfgMu     sync.RWMutex
 	http      *http.Client
 	me        telegramUser
 	histories *chatHistories
@@ -198,7 +200,11 @@ func loadEnvFile(path string) error {
 		}
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("close %s: %v", path, closeErr)
+		}
+	}()
 	log.Printf("loading env from %s", path)
 
 	scanner := bufio.NewScanner(file)
@@ -308,6 +314,11 @@ func (b *bot) handleMessage(ctx context.Context, msg telegramMessage) error {
 		}
 		return nil
 	}
+
+	if handled, err := b.handleConfigCommand(ctx, msg); handled {
+		return err
+	}
+
 	author := displayName(msg.From)
 	b.histories.add(msg.Chat.ID, chatMessage{
 		Role: "user",
@@ -324,7 +335,7 @@ func (b *bot) handleMessage(ctx context.Context, msg telegramMessage) error {
 	switch strings.TrimSpace(prompt) {
 	case "/start", "/help":
 		log.Printf("send help for message id=%d", msg.MessageID)
-		return b.sendMessage(ctx, msg.Chat.ID, "Напишите /ask вопрос, упомяните меня или ответьте на моё сообщение. Я отвечаю с учётом последних сообщений чата.", msg.MessageID)
+		return b.sendMessage(ctx, msg.Chat.ID, "Напишите /ask вопрос, упомяните меня или ответьте на моё сообщение. Настройки: /settings, /set_promt, /set_probability.", msg.MessageID)
 	}
 	if prompt == "" {
 		log.Printf("empty prompt for message id=%d", msg.MessageID)
@@ -380,13 +391,103 @@ func (b *bot) shouldAnswer(msg telegramMessage) (bool, string, string) {
 	}
 
 	if msg.Chat.Type == "group" || msg.Chat.Type == "supergroup" {
-		if randomChance(b.cfg.ReplyProb) {
-			return true, text, fmt.Sprintf("random group reply hit probability=%.2f", b.cfg.ReplyProb)
+		replyProb := b.replyProb()
+		if randomChance(replyProb) {
+			return true, text, fmt.Sprintf("random group reply hit probability=%.2f", replyProb)
 		}
-		return false, "", fmt.Sprintf("random group reply missed probability=%.2f", b.cfg.ReplyProb)
+		return false, "", fmt.Sprintf("random group reply missed probability=%.2f", replyProb)
 	}
 
 	return false, "", "unsupported chat type"
+}
+
+func (b *bot) handleConfigCommand(ctx context.Context, msg telegramMessage) (bool, error) {
+	command, args, ok := splitBotCommand(msg.Text, b.me.Username)
+	if !ok {
+		return false, nil
+	}
+
+	switch command {
+	case "/settings":
+		log.Printf("send settings for message id=%d", msg.MessageID)
+		return true, b.sendPlainMessage(ctx, msg.Chat.ID, b.currentSettingsText(), msg.MessageID)
+	case "/set_promt":
+		if args == "" {
+			return true, b.sendMessage(ctx, msg.Chat.ID, "Использование: /set_promt новый системный промт", msg.MessageID)
+		}
+		b.setSystemPrompt(args)
+		log.Printf("system prompt updated by user=%s chat_id=%d prompt=%q", displayName(msg.From), msg.Chat.ID, logPreview(args))
+		return true, b.sendMessage(ctx, msg.Chat.ID, "Системный промт обновлён.", msg.MessageID)
+	case "/set_probability":
+		if args == "" {
+			return true, b.sendMessage(ctx, msg.Chat.ID, "Использование: /set_probability 0.5", msg.MessageID)
+		}
+
+		probability, err := strconv.ParseFloat(strings.ReplaceAll(args, ",", "."), 64)
+		if err != nil || probability < 0 || probability > 1 {
+			return true, b.sendMessage(ctx, msg.Chat.ID, "Вероятность должна быть числом от 0 до 1, например /set_probability 0.5", msg.MessageID)
+		}
+
+		b.setReplyProb(probability)
+		log.Printf("reply probability updated by user=%s chat_id=%d probability=%.2f", displayName(msg.From), msg.Chat.ID, probability)
+		return true, b.sendMessage(ctx, msg.Chat.ID, fmt.Sprintf("Вероятность ответа обновлена: %.2f", probability), msg.MessageID)
+	default:
+		return false, nil
+	}
+}
+
+func splitBotCommand(text string, botUsername string) (string, string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return "", "", false
+	}
+
+	commandToken := text
+	args := ""
+	if index := strings.IndexFunc(text, unicode.IsSpace); index >= 0 {
+		commandToken = text[:index]
+		args = strings.TrimSpace(text[index:])
+	}
+
+	command, suffix, hasSuffix := strings.Cut(commandToken, "@")
+	if hasSuffix {
+		if botUsername == "" || !strings.EqualFold(suffix, botUsername) {
+			return "", "", false
+		}
+	}
+
+	return strings.ToLower(command), args, true
+}
+
+func (b *bot) systemPrompt() string {
+	b.cfgMu.RLock()
+	defer b.cfgMu.RUnlock()
+	return b.cfg.SystemPrompt
+}
+
+func (b *bot) setSystemPrompt(prompt string) {
+	b.cfgMu.Lock()
+	defer b.cfgMu.Unlock()
+	b.cfg.SystemPrompt = prompt
+}
+
+func (b *bot) replyProb() float64 {
+	b.cfgMu.RLock()
+	defer b.cfgMu.RUnlock()
+	return b.cfg.ReplyProb
+}
+
+func (b *bot) setReplyProb(probability float64) {
+	b.cfgMu.Lock()
+	defer b.cfgMu.Unlock()
+	b.cfg.ReplyProb = probability
+}
+
+func (b *bot) currentSettingsText() string {
+	b.cfgMu.RLock()
+	defer b.cfgMu.RUnlock()
+
+	return fmt.Sprintf("Текущие настройки:\nВероятность ответа: %.2f\nСистемный промт:\n%s", b.cfg.ReplyProb, b.cfg.SystemPrompt)
 }
 
 func randomChance(probability float64) bool {
@@ -409,7 +510,7 @@ func randomChance(probability float64) bool {
 func (b *bot) askLLM(ctx context.Context, chatID int64, prompt string) (string, string, error) {
 	history := b.histories.get(chatID)
 	log.Printf("ask LLM: chat_id=%d history_messages=%d prompt=%q", chatID, len(history), logPreview(prompt))
-	messages := []llmMessage{{Role: "system", Content: b.cfg.SystemPrompt}}
+	messages := []llmMessage{{Role: "system", Content: b.systemPrompt()}}
 
 	for _, item := range history {
 		role := item.Role
@@ -479,10 +580,20 @@ func (b *bot) getUpdates(ctx context.Context, offset int) ([]update, error) {
 }
 
 func (b *bot) sendMessage(ctx context.Context, chatID int64, text string, replyTo int) error {
+	return b.sendTextMessage(ctx, chatID, markdownToTelegramHTML(text), "HTML", replyTo)
+}
+
+func (b *bot) sendPlainMessage(ctx context.Context, chatID int64, text string, replyTo int) error {
+	return b.sendTextMessage(ctx, chatID, text, "", replyTo)
+}
+
+func (b *bot) sendTextMessage(ctx context.Context, chatID int64, text string, parseMode string, replyTo int) error {
 	payload := map[string]any{
-		"chat_id":    chatID,
-		"text":       markdownToTelegramHTML(text),
-		"parse_mode": "HTML",
+		"chat_id": chatID,
+		"text":    text,
+	}
+	if parseMode != "" {
+		payload["parse_mode"] = parseMode
 	}
 	if replyTo > 0 {
 		payload["reply_parameters"] = map[string]any{"message_id": replyTo}
@@ -550,7 +661,11 @@ func (b *bot) doJSON(req *http.Request, target any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("close response body: %v", closeErr)
+		}
+	}()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {

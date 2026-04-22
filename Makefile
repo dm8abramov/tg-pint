@@ -1,6 +1,7 @@
-.PHONY: run test build fmt env
+.PHONY: run test build fmt env docker-build docker-run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
+DOCKER_IMAGE ?= tg-pint:local
 
 run:
 	go run .
@@ -12,7 +13,13 @@ build:
 	GOCACHE=$(GOCACHE) go build -o bin/tg-pint .
 
 fmt:
-	gofmt -w main.go
+	gofmt -w main.go markdown.go main_test.go
 
 env:
 	cp .env.example .env
+
+docker-build:
+	docker build -t $(DOCKER_IMAGE) .
+
+docker-run: docker-build
+	docker run --rm --env-file .env $(DOCKER_IMAGE)

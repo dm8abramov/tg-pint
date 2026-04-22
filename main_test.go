@@ -49,3 +49,60 @@ func TestMarkdownToTelegramHTML(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitBotCommand(t *testing.T) {
+	tests := []struct {
+		name        string
+		text        string
+		botUsername string
+		wantCommand string
+		wantArgs    string
+		wantOK      bool
+	}{
+		{
+			name:        "plain command",
+			text:        "/set_probability 0.5",
+			wantCommand: "/set_probability",
+			wantArgs:    "0.5",
+			wantOK:      true,
+		},
+		{
+			name:        "command with bot suffix",
+			text:        "/set_promt@TestBot новый промт",
+			botUsername: "testbot",
+			wantCommand: "/set_promt",
+			wantArgs:    "новый промт",
+			wantOK:      true,
+		},
+		{
+			name:        "settings command with bot suffix",
+			text:        "/settings@TestBot",
+			botUsername: "testbot",
+			wantCommand: "/settings",
+			wantOK:      true,
+		},
+		{
+			name:        "command for another bot",
+			text:        "/set_probability@OtherBot 0.5",
+			botUsername: "testbot",
+			wantOK:      false,
+		},
+		{
+			name:   "not command",
+			text:   "set_probability 0.5",
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotCommand, gotArgs, gotOK := splitBotCommand(tt.text, tt.botUsername)
+			if gotOK != tt.wantOK {
+				t.Fatalf("splitBotCommand(%q, %q) ok = %v, want %v", tt.text, tt.botUsername, gotOK, tt.wantOK)
+			}
+			if gotCommand != tt.wantCommand || gotArgs != tt.wantArgs {
+				t.Fatalf("splitBotCommand(%q, %q) = (%q, %q), want (%q, %q)", tt.text, tt.botUsername, gotCommand, gotArgs, tt.wantCommand, tt.wantArgs)
+			}
+		})
+	}
+}
