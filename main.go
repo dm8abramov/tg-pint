@@ -480,8 +480,9 @@ func (b *bot) getUpdates(ctx context.Context, offset int) ([]update, error) {
 
 func (b *bot) sendMessage(ctx context.Context, chatID int64, text string, replyTo int) error {
 	payload := map[string]any{
-		"chat_id": chatID,
-		"text":    text,
+		"chat_id":    chatID,
+		"text":       markdownToTelegramHTML(text),
+		"parse_mode": "HTML",
 	}
 	if replyTo > 0 {
 		payload["reply_parameters"] = map[string]any{"message_id": replyTo}
