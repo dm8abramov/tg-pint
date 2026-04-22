@@ -75,6 +75,13 @@ func TestSplitBotCommand(t *testing.T) {
 			wantOK:      true,
 		},
 		{
+			name:        "set prompt alias",
+			text:        "/set_prompt новый промт",
+			wantCommand: "/set_prompt",
+			wantArgs:    "новый промт",
+			wantOK:      true,
+		},
+		{
 			name:        "settings command with bot suffix",
 			text:        "/settings@TestBot",
 			botUsername: "testbot",
@@ -104,5 +111,24 @@ func TestSplitBotCommand(t *testing.T) {
 				t.Fatalf("splitBotCommand(%q, %q) = (%q, %q), want (%q, %q)", tt.text, tt.botUsername, gotCommand, gotArgs, tt.wantCommand, tt.wantArgs)
 			}
 		})
+	}
+}
+
+func TestUpdateSystemPromptClearsHistory(t *testing.T) {
+	b := &bot{
+		cfg: config{
+			SystemPrompt: "old",
+		},
+		histories: &chatHistories{items: make(map[int64][]chatMessage)},
+	}
+	b.histories.add(1, chatMessage{Role: "user", Text: "old context"})
+
+	b.updateSystemPrompt("new")
+
+	if got := b.systemPrompt(); got != "new" {
+		t.Fatalf("systemPrompt() = %q, want %q", got, "new")
+	}
+	if got := b.histories.get(1); len(got) != 0 {
+		t.Fatalf("history len = %d, want 0", len(got))
 	}
 }

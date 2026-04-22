@@ -6,7 +6,7 @@ Telegram bot for group chats. It keeps a short in-memory context per chat and an
 - mention the bot in a group, for example `@your_bot что думаешь?`
 - reply to the bot's message in a group
 - send `/ask your question`
-- send `/set_promt new system prompt` to change the system prompt until restart
+- send `/set_promt new system prompt` to change the system prompt until restart (`/set_prompt` also works)
 - send `/set_probability 0.5` to change random group reply probability until restart
 - send `/settings` to show the current runtime settings
 - write regular group messages, with the configured probability

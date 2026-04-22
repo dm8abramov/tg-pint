@@ -411,13 +411,13 @@ func (b *bot) handleConfigCommand(ctx context.Context, msg telegramMessage) (boo
 	case "/settings":
 		log.Printf("send settings for message id=%d", msg.MessageID)
 		return true, b.sendPlainMessage(ctx, msg.Chat.ID, b.currentSettingsText(), msg.MessageID)
-	case "/set_promt":
+	case "/set_promt", "/set_prompt":
 		if args == "" {
 			return true, b.sendMessage(ctx, msg.Chat.ID, "Использование: /set_promt новый системный промт", msg.MessageID)
 		}
-		b.setSystemPrompt(args)
+		b.updateSystemPrompt(args)
 		log.Printf("system prompt updated by user=%s chat_id=%d prompt=%q", displayName(msg.From), msg.Chat.ID, logPreview(args))
-		return true, b.sendMessage(ctx, msg.Chat.ID, "Системный промт обновлён.", msg.MessageID)
+		return true, b.sendMessage(ctx, msg.Chat.ID, "Системный промт обновлён. История чатов сброшена, чтобы новая инструкция применялась сразу.", msg.MessageID)
 	case "/set_probability":
 		if args == "" {
 			return true, b.sendMessage(ctx, msg.Chat.ID, "Использование: /set_probability 0.5", msg.MessageID)
@@ -465,10 +465,12 @@ func (b *bot) systemPrompt() string {
 	return b.cfg.SystemPrompt
 }
 
-func (b *bot) setSystemPrompt(prompt string) {
+func (b *bot) updateSystemPrompt(prompt string) {
 	b.cfgMu.Lock()
-	defer b.cfgMu.Unlock()
 	b.cfg.SystemPrompt = prompt
+	b.cfgMu.Unlock()
+
+	b.histories.clear()
 }
 
 func (b *bot) replyProb() float64 {
@@ -699,6 +701,13 @@ func (h *chatHistories) get(chatID int64) []chatMessage {
 	result := make([]chatMessage, len(items))
 	copy(result, items)
 	return result
+}
+
+func (h *chatHistories) clear() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.items = make(map[int64][]chatMessage)
 }
 
 func displayName(user telegramUser) string {
